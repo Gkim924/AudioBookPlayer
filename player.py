@@ -1,4 +1,6 @@
 import RPi.GPIO as GPIO
+import subprocess
+import sys
 from mpd import (MPDClient, CommandError)
 from socket import error as SocketError
 
@@ -8,6 +10,7 @@ playingLedPin = 7
 playButtonPin = 16
 rewindButtonPin = 11
 fastForwardButtonPin = 15
+shutDownButtonPin = 31
 
 playerState = 'Paused'
 
@@ -74,10 +77,12 @@ def initGPIO(client):
     GPIO.setup(playButtonPin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(rewindButtonPin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(fastForwardButtonPin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(shutDownButtonPin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     GPIO.add_event_detect(playButtonPin,GPIO.RISING, lambda playButtonPin, tmp_client=client:playPause(playButtonPin,tmp_client), bouncetime=200)
     GPIO.add_event_detect(rewindButtonPin,GPIO.RISING, lambda rewindButtonPin, tmp_client=client:rewind(rewindButtonPin,tmp_client), bouncetime=200)
     GPIO.add_event_detect(fastForwardButtonPin,GPIO.RISING, lambda fastForwardButtonPin, tmp_client=client:fastForward(fastForwardButtonPin,tmp_client), bouncetime=200)
+    GPIO.add_event_detect(shutDownButtonPin,GPIO.RISING, lambda shutDownButtonPin, tmp_client=client:closePlayer(GPIO,tmp_client), bouncetime=200)
 
     print('GPIO Initialized...')
 
@@ -92,6 +97,23 @@ def mpdConnect(client, con_id):
                 return False
         return True
 
+# Cleanup all connections and shut down player
+def closePlayer(GPIO, client):
+    print('\n')
+    print('Cleaning up GPIO...')
+    GPIO.cleanup()
+    print('Cleaning up MPD...')
+    status = client.status()
+    if status["state"] == 'play':
+        client.pause()
+    client.close()                     # send the close command
+    client.disconnect()                # disconnect from the server
+    print('Exiting...')
+    subprocess.call(['sudo','shutdown', '-h', 'now'], shell=False) # this shuts down. next line never executed
+    sys.exit() # use this for debug
+
+######################################################################################################
+
 def main():
 
     ## MPD object instance
@@ -100,9 +122,9 @@ def main():
     # Initialize GPIO
     initGPIO(client)
 
-    status = client.status()
     print('MPD Connected...')
-    #print(status)
+    book = client.currentsong()
+    print('Playing: ', book['file'])
 
     print('Player Starting...')
     print('Playback: ' + playerState)
@@ -116,16 +138,7 @@ def main():
             continue
 
     except:
-        print('\n')
-        print('Cleaning up GPIO...')
-        GPIO.cleanup()
-        print('Cleaning up MPD...')
-        status = client.status()
-        if status["state"] == 'play':
-            client.pause()
-        client.close()                     # send the close command
-        client.disconnect()                # disconnect from the server
-        print('Exiting...')
+        closePlayer(GPIO, client)
 
 # Script starts here
 if __name__ == "__main__":
